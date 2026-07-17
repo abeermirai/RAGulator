@@ -21,6 +21,7 @@ type AuditCtx = {
   report: ReportResponse | null;
   messages: ChatMessage[];
   apiOnline: boolean;
+  analyzing: boolean;
   loading: boolean;
   uploadFile: (file: File, zone: DocumentZone) => Promise<void>;
   deleteDocument: (docId: string) => Promise<void>;
@@ -40,7 +41,7 @@ export function AuditProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [findings, setFindings] = useState<FindingsResponse | null>(null);
   const [report, setReport] = useState<ReportResponse | null>(null);
-  const analyzedRef = useRef(false);
+  const lastAnalyzedFingerprint = useRef("");
 
   const healthQuery = useQuery({
     queryKey: ["audit-health"],
@@ -53,6 +54,7 @@ export function AuditProvider({ children }: { children: ReactNode }) {
     queryKey: ["audit-cycle"],
     queryFn: () => auditApi.getDefaultCycle(),
     enabled: healthQuery.isSuccess,
+    refetchInterval: 10_000,
   });
 
   const cycleId = cycleQuery.data?.id;
@@ -67,6 +69,8 @@ export function AuditProvider({ children }: { children: ReactNode }) {
     },
   });
 
+  const documents = docsQuery.data ?? [];
+
   const pipelineQuery = useQuery({
     queryKey: ["audit-pipeline", cycleId],
     queryFn: () => auditApi.getPipeline(cycleId!),
@@ -77,18 +81,38 @@ export function AuditProvider({ children }: { children: ReactNode }) {
     },
   });
 
+  const readyDocFingerprint = useMemo(
+    () =>
+      documents
+        .filter((d) => d.status === "ready")
+        .map((d) => d.id)
+        .sort()
+        .join(","),
+    [documents],
+  );
+
+  const resetAnalysisState = useCallback(() => {
+    lastAnalyzedFingerprint.current = "";
+    setFindings(null);
+    setMessages([]);
+    setReport(null);
+  }, []);
+
   const uploadMutation = useMutation({
     mutationFn: ({ file, zone }: { file: File; zone: DocumentZone }) =>
       auditApi.uploadDocument(cycleId!, file, zone),
     onSuccess: () => {
+      resetAnalysisState();
       qc.invalidateQueries({ queryKey: ["audit-documents", cycleId] });
       qc.invalidateQueries({ queryKey: ["audit-pipeline", cycleId] });
+      qc.invalidateQueries({ queryKey: ["audit-cycle"] });
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (docId: string) => auditApi.deleteDocument(cycleId!, docId),
     onSuccess: () => {
+      resetAnalysisState();
       qc.invalidateQueries({ queryKey: ["audit-documents", cycleId] });
       qc.invalidateQueries({ queryKey: ["audit-pipeline", cycleId] });
     },
@@ -98,6 +122,7 @@ export function AuditProvider({ children }: { children: ReactNode }) {
     mutationFn: () => auditApi.analyze(cycleId!),
     onSuccess: (data) => {
       setFindings(data.findings);
+      setReport(null);
       if (data.sample_query) {
         setMessages([
           { id: "sample-q", role: "user", content: data.sample_query.question },
@@ -127,27 +152,31 @@ export function AuditProvider({ children }: { children: ReactNode }) {
     mutationFn: () => auditApi.exportReportPdf(cycleId!),
   });
 
+  // Re-analyze whenever the set of ready documents changes
   useEffect(() => {
-    if (pipelineQuery.data?.ready && cycleId && !findings && !analyzedRef.current) {
-      analyzedRef.current = true;
-      analyzeMutation.mutate();
-    }
-  }, [pipelineQuery.data?.ready, cycleId, findings]);
+    if (!cycleId || !pipelineQuery.data?.ready || !readyDocFingerprint) return;
+    if (lastAnalyzedFingerprint.current === readyDocFingerprint) return;
+    lastAnalyzedFingerprint.current = readyDocFingerprint;
+    analyzeMutation.mutate();
+  }, [cycleId, pipelineQuery.data?.ready, readyDocFingerprint]);
 
   const refreshAll = useCallback(() => {
+    resetAnalysisState();
+    qc.invalidateQueries({ queryKey: ["audit-cycle"] });
     qc.invalidateQueries({ queryKey: ["audit-documents", cycleId] });
     qc.invalidateQueries({ queryKey: ["audit-pipeline", cycleId] });
-  }, [qc, cycleId]);
+  }, [qc, cycleId, resetAnalysisState]);
 
   const value = useMemo<AuditCtx>(
     () => ({
       cycle: cycleQuery.data ?? null,
-      documents: docsQuery.data ?? [],
+      documents,
       pipeline: pipelineQuery.data ?? null,
       findings,
       report,
       messages,
       apiOnline: healthQuery.isSuccess,
+      analyzing: analyzeMutation.isPending,
       loading: cycleQuery.isLoading || docsQuery.isLoading,
       uploadFile: async (file, zone) => {
         if (!cycleId) throw new Error("No audit cycle");
@@ -156,7 +185,10 @@ export function AuditProvider({ children }: { children: ReactNode }) {
       deleteDocument: async (docId) => {
         await deleteMutation.mutateAsync(docId);
       },
-      runAnalysis: async () => analyzeMutation.mutateAsync(),
+      runAnalysis: async () => {
+        resetAnalysisState();
+        return analyzeMutation.mutateAsync();
+      },
       askQuestion: async (question) => queryMutation.mutateAsync(question),
       loadReport: async () => reportMutation.mutateAsync(),
       exportReportPdf: async () => exportMutation.mutateAsync(),
@@ -166,12 +198,13 @@ export function AuditProvider({ children }: { children: ReactNode }) {
     }),
     [
       cycleQuery.data,
-      docsQuery.data,
+      documents,
       pipelineQuery.data,
       findings,
       report,
       messages,
       healthQuery.isSuccess,
+      analyzeMutation.isPending,
       cycleQuery.isLoading,
       docsQuery.isLoading,
       cycleId,
@@ -182,6 +215,7 @@ export function AuditProvider({ children }: { children: ReactNode }) {
       reportMutation,
       exportMutation,
       refreshAll,
+      resetAnalysisState,
       healthQuery.data?.llm_available,
       healthQuery.data?.llm_provider,
     ],

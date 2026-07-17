@@ -18,11 +18,13 @@ export const Route = createFileRoute("/_shell/workspace")({
 
 function Workspace() {
   const { t, dir } = useApp();
-  const { messages, findings, askQuestion, documents, pipeline } = useAudit();
+  const { messages, findings, askQuestion, documents, pipeline, analyzing, apiOnline } = useAudit();
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const latestResponse = [...messages].reverse().find((m) => m.role === "assistant")?.response;
   const primaryCitation = latestResponse?.citations[0];
+  const readyDocs = documents.filter((d) => d.status === "ready");
+  const hasDocs = readyDocs.length > 0 && pipeline?.ready;
 
   const handleSend = async () => {
     const q = input.trim();
@@ -38,15 +40,35 @@ function Workspace() {
     }
   };
 
-  const hasDocs = documents.length > 0 && pipeline?.ready;
-
   return (
     <>
       <TopBar title={t("wsTitle")} subtitle={t("wsSubtitle")} />
       <div className="p-6">
-        {!hasDocs && (
+        {!apiOnline && (
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
+            Backend غير متصل — شغّل Python API على المنفذ 8000 ثم ارفع المستندات من جديد.
+          </div>
+        )}
+        {!hasDocs && apiOnline && (
           <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
             {t("ragStep1")} — <Link to="/ingestion" className="underline font-medium">{t("navIngestion")}</Link>
+          </div>
+        )}
+        {hasDocs && (
+          <div className="mb-4 rounded-xl border border-[#5E6BB2]/25 bg-[#5E6BB2]/5 p-4">
+            <p className="text-xs font-bold text-foreground mb-2">المستندات المفهرسة ({readyDocs.length})</p>
+            <div className="flex flex-wrap gap-2">
+              {readyDocs.map((d) => (
+                <span key={d.id} className="rounded-full border border-[#5E6BB2]/30 bg-card px-3 py-1 text-[11px] text-foreground">
+                  {d.filename}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {analyzing && (
+          <div className="mb-4 rounded-xl border border-border bg-secondary/40 p-3 text-sm text-muted-foreground">
+            {t("processing")} — {t("ragSubtitle")}
           </div>
         )}
 
@@ -58,7 +80,9 @@ function Workspace() {
             </div>
             <div className="flex-1 overflow-y-auto p-6 space-y-5 bg-secondary/20">
               {messages.length === 0 ? (
-                <div className="text-sm text-muted-foreground text-center py-10">{t("wsInputPh")}</div>
+                <div className="text-sm text-muted-foreground text-center py-10">
+                  {analyzing ? t("processing") : hasDocs ? t("wsInputPh") : t("ragStep1")}
+                </div>
               ) : (
                 messages.map((m) =>
                   m.role === "user" ? (
@@ -131,6 +155,11 @@ function Workspace() {
                       {t("wsPageNo")} {primaryCitation.page} · Chunk {primaryCitation.chunk_id.slice(0, 8)}
                     </p>
                   </>
+                ) : hasDocs ? (
+                  <div className="text-center text-muted-foreground py-16">
+                    <p className="text-sm">{t("wsInputPh")}</p>
+                    <p className="text-xs mt-2">{readyDocs.map((d) => d.filename).join(" · ")}</p>
+                  </div>
                 ) : (
                   <>
                     <h4 className="font-bold text-lg mb-4 text-foreground pb-2 border-b border-border">{t("wsPdfTitle")}</h4>
@@ -142,15 +171,26 @@ function Workspace() {
             </div>
           </Card>
         </div>
-        <FindingsPanel findings={findings} />
+        <FindingsPanel findings={findings} analyzing={analyzing} hasDocs={hasDocs} />
       </div>
     </>
   );
 }
 
-function FindingsPanel({ findings }: { findings: ReturnType<typeof useAudit>["findings"] }) {
+function FindingsPanel({
+  findings,
+  analyzing,
+  hasDocs,
+}: {
+  findings: ReturnType<typeof useAudit>["findings"];
+  analyzing: boolean;
+  hasDocs: boolean;
+}) {
   const { t } = useApp();
   const f = findings;
+  const pending = analyzing || (hasDocs && !f);
+  const body = (value: string | undefined, emptyLabel: string) =>
+    pending ? `${t("processing")}...` : value ?? (hasDocs ? emptyLabel : t("ragStep1"));
 
   return (
     <div className="mt-6 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-6">
@@ -160,10 +200,10 @@ function FindingsPanel({ findings }: { findings: ReturnType<typeof useAudit>["fi
           <p className="text-xs text-muted-foreground mt-1">{t("fpSubtitle")}</p>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <FindingItem icon={CheckCircle2} tone="emerald" title={t("fpFindings")} body={f?.findings[0]?.body ?? t("fpFinding1")} />
-          <FindingItem icon={ShieldCheck} tone="steel" title={t("fpCompliance")} body={f?.compliance[0]?.body ?? t("fpCompliance1")} />
-          <FindingItem icon={AlertCircle} tone="amber" title={t("fpMissing")} body={f?.missing[0]?.body ?? t("fpMissing1")} />
-          <FindingItem icon={Lightbulb} tone="copper" title={t("fpSuggestions")} body={f?.suggestions[0]?.body ?? t("fpSuggestion1")} />
+          <FindingItem icon={CheckCircle2} tone="emerald" title={t("fpFindings")} body={body(f?.findings[0]?.body, t("fpFinding1"))} />
+          <FindingItem icon={ShieldCheck} tone="steel" title={t("fpCompliance")} body={body(f?.compliance[0]?.body, t("fpCompliance1"))} />
+          <FindingItem icon={AlertCircle} tone="amber" title={t("fpMissing")} body={body(f?.missing[0]?.body, t("fpMissing1"))} />
+          <FindingItem icon={Lightbulb} tone="copper" title={t("fpSuggestions")} body={body(f?.suggestions[0]?.body, t("fpSuggestion1"))} />
         </div>
       </div>
       <div className="rounded-2xl border border-border bg-[#001827] text-white shadow-elegant p-6 flex flex-col justify-between">

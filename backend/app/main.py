@@ -148,7 +148,10 @@ def analyze_cycle(cycle_id: str) -> AnalyzeResponse:
         raise HTTPException(status_code=409, detail="Documents still processing")
 
     findings = rag_service.build_findings(cycle_id)
-    sample = rag_service.query(cycle_id, "هل يغطي رأس المال الحالي مخاطر التركز الائتماني؟")
+    sample = rag_service.query(
+        cycle_id,
+        "What are the main ICAAP credit risk model audit findings and recommendations from the uploaded reports?",
+    )
     store.set_analysis_ready(cycle_id, True)
     return AnalyzeResponse(ready=True, findings=findings, sample_query=sample)
 

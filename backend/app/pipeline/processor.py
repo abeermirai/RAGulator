@@ -33,7 +33,7 @@ def _stage_state(current: ProcessingStage, target: ProcessingStage) -> str:
     if target_idx < current_idx:
         return "done"
     if target_idx == current_idx:
-        return "running"
+        return "done" if current == ProcessingStage.ready else "running"
     return "pending"
 
 

@@ -172,46 +172,61 @@ class RagService:
         match = re.search(pattern, text, flags)
         return match.group(1) if match else None
 
+    def _summarize_citation(self, citations: list[Citation], fallback: str) -> str:
+        if not citations:
+            return fallback
+        c = citations[0]
+        snippet = " ".join(c.quote.split())[:320]
+        return f"من {c.filename} (ص {c.page}): {snippet}"
+
     def build_findings(self, cycle_id: str) -> FindingsResponse:
-        probes = [
-            "capital adequacy ratio CAR Basel SAMA",
-            "liquidity coverage ratio LCR stress test",
-            "credit concentration real estate sector",
-            "ICAAP governance risk management",
-            "missing disclosure sensitivity analysis",
+        probe_map = [
+            ("findings", "ICAAP credit risk model audit findings executive summary"),
+            ("compliance", "ICAAP ILAAP regulatory compliance governance EBA guidelines"),
+            ("missing", "gaps limitations missing documentation sensitivity analysis"),
+            ("suggestions", "audit recommendations improvements model validation remediation"),
         ]
         all_citations: list[Citation] = []
-        snippets: list[str] = []
-        for probe in probes:
+        category_citations: dict[str, list[Citation]] = {}
+        category_snippets: dict[str, list[str]] = {}
+
+        for category, probe in probe_map:
             result = self.query(cycle_id, probe)
+            category_citations[category] = result.citations
+            category_snippets[category] = [c.quote for c in result.citations]
             all_citations.extend(result.citations)
-            if result.citations:
-                snippets.append(result.citations[0].quote)
 
-        joined = "\n".join(snippets)
+        joined = "\n".join(category_snippets.get("findings", []))
         car = self._find_metric(joined, r"(\d{1,2}(?:\.\d+)?)\s*%")
-        amount = self._find_metric(joined, r"(\d+(?:\.\d+)?)\s*(?:billion|مليار)")
 
-        finding_fallback = (
+        finding_fallback = self._summarize_citation(
+            category_citations.get("findings", []),
             f"تم استخراج نسبة كفاية رأس المال {car}% من المستندات المرفوعة."
             if car
-            else "تم تحليل المستندات المرفوعة واستخراج مؤشرات ICAAP الرئيسية."
+            else "لم تُستخرج بعد أدلة كافية — تأكد من اكتمال فهرسة المستندات.",
         )
-        missing_fallback = (
-            "لم يُرصد في المستندات المرفوعة تحليل حساسية سعر الفائدة — يُنصح بإرفاقه."
-            if "sensitivity" not in joined.lower() and "حساسية" not in joined
-            else "تم رصد بعض إفصاحات الحساسية؛ يُوصى بمراجعتها مقابل متطلبات البند 5.3."
+        compliance_fallback = self._summarize_citation(
+            category_citations.get("compliance", []),
+            "تمت مراجعة الأدلة المسترجعة مقابل متطلبات ICAAP/ILAAP الواردة في المستندات.",
         )
-        suggestion_fallback = (
-            f"توسيع تحليل التركز الائتماني بناءً على الأدلة المسترجعة"
-            + (f" (هامش رأس المال {amount} مليار)." if amount else ".")
+        missing_fallback = self._summarize_citation(
+            category_citations.get("missing", []),
+            "لم يُرصد تحليل حساسية كامل — يُنصح بمراجعة فجوات الإفصاح في المستندات المرفوعة.",
+        )
+        suggestion_fallback = self._summarize_citation(
+            category_citations.get("suggestions", []),
+            "يُوصى بتوسيع التحقق من النموذج والتوثيق بناءً على ملاحظات التدقيق الداخلية.",
         )
 
         findings = [
             Finding(
                 category="findings",
                 title="النتائج الرئيسية",
-                body=llm_service.synthesize_finding("Key ICAAP metrics", snippets, finding_fallback),
+                body=llm_service.synthesize_finding(
+                    "Key ICAAP audit findings",
+                    category_snippets.get("findings", []),
+                    finding_fallback,
+                ),
             )
         ]
         compliance = [
@@ -219,9 +234,9 @@ class RagService:
                 category="compliance",
                 title="ملاحظات الالتزام",
                 body=llm_service.synthesize_finding(
-                    "SAMA and Basel III compliance",
-                    snippets,
-                    "تمت مطابقة الأدلة المسترجعة مع متطلبات SAMA وBasel III الواردة في المستندات.",
+                    "ICAAP ILAAP compliance",
+                    category_snippets.get("compliance", []),
+                    compliance_fallback,
                 ),
             )
         ]
@@ -229,17 +244,25 @@ class RagService:
             Finding(
                 category="missing",
                 title="معلومات ناقصة",
-                body=llm_service.synthesize_finding("Missing disclosures", snippets, missing_fallback),
+                body=llm_service.synthesize_finding(
+                    "Missing audit information",
+                    category_snippets.get("missing", []),
+                    missing_fallback,
+                ),
             )
         ]
         suggestions = [
             Finding(
                 category="suggestions",
                 title="مقترحات تحسين",
-                body=llm_service.synthesize_finding("Improvement recommendations", snippets, suggestion_fallback),
+                body=llm_service.synthesize_finding(
+                    "Audit improvement recommendations",
+                    category_snippets.get("suggestions", []),
+                    suggestion_fallback,
+                ),
             )
         ]
-        confidence = 88 if all_citations else 60
+        confidence = min(95, max(60, 55 + len(all_citations) * 4))
         return FindingsResponse(
             findings=findings,
             compliance=compliance,
