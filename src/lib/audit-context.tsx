@@ -27,7 +27,10 @@ type AuditCtx = {
   runAnalysis: () => Promise<AnalyzeResponse>;
   askQuestion: (question: string) => Promise<QueryResponse>;
   loadReport: () => Promise<ReportResponse>;
+  exportReportPdf: () => Promise<void>;
   refreshAll: () => void;
+  llmAvailable: boolean;
+  llmProvider: string | null;
 };
 
 const AuditContext = createContext<AuditCtx | null>(null);
@@ -120,6 +123,10 @@ export function AuditProvider({ children }: { children: ReactNode }) {
     onSuccess: setReport,
   });
 
+  const exportMutation = useMutation({
+    mutationFn: () => auditApi.exportReportPdf(cycleId!),
+  });
+
   useEffect(() => {
     if (pipelineQuery.data?.ready && cycleId && !findings && !analyzedRef.current) {
       analyzedRef.current = true;
@@ -152,7 +159,10 @@ export function AuditProvider({ children }: { children: ReactNode }) {
       runAnalysis: async () => analyzeMutation.mutateAsync(),
       askQuestion: async (question) => queryMutation.mutateAsync(question),
       loadReport: async () => reportMutation.mutateAsync(),
+      exportReportPdf: async () => exportMutation.mutateAsync(),
       refreshAll,
+      llmAvailable: healthQuery.data?.llm_available ?? false,
+      llmProvider: healthQuery.data?.llm_provider ?? null,
     }),
     [
       cycleQuery.data,
@@ -170,7 +180,10 @@ export function AuditProvider({ children }: { children: ReactNode }) {
       analyzeMutation,
       queryMutation,
       reportMutation,
+      exportMutation,
       refreshAll,
+      healthQuery.data?.llm_available,
+      healthQuery.data?.llm_provider,
     ],
   );
 

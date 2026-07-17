@@ -34,6 +34,27 @@ API runs at `http://127.0.0.1:8000`.
 | POST | `/api/cycles/{id}/query` | RAG question answering |
 | GET | `/api/cycles/{id}/report` | Generated ICAAP report |
 
+## LLM (optional)
+
+Set environment variables in `backend/.env`:
+
+```env
+# Prefer OpenAI
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o-mini
+
+# Or use local Ollama
+LLM_PROVIDER=ollama
+OLLAMA_MODEL=llama3.2
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+```
+
+If no LLM is configured, the system uses extractive answers from retrieved chunks.
+
+## PDF export
+
+`GET /api/cycles/{id}/report/export` generates a downloadable ICAAP PDF via PyMuPDF.
+
 ## Supported uploads
 
 PDF, DOCX, XLSX, TXT, CSV (max 50MB)

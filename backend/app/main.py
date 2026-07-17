@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from app.config import settings
 from app.models import (
@@ -20,6 +20,8 @@ from app.models import (
     StageProgress,
 )
 from app.pipeline.processor import create_document_record, process_document
+from app.pipeline.pdf_export import build_report_pdf
+from app.pipeline.llm import llm_service
 from app.pipeline.rag import rag_service
 from app.storage import store
 
@@ -35,8 +37,15 @@ app.add_middleware(
 
 
 @app.get("/api/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "engine": "LlamaIndex + Qdrant + FastEmbed + PyMuPDF"}
+def health() -> dict[str, str | bool]:
+    llm = llm_service.info
+    return {
+        "status": "ok",
+        "engine": "LlamaIndex + Qdrant + FastEmbed + PyMuPDF",
+        "llm_provider": str(llm["provider"]),
+        "llm_model": str(llm["model"]),
+        "llm_available": bool(llm["available"]),
+    }
 
 
 @app.post("/api/cycles", response_model=AuditCycle)
@@ -167,6 +176,21 @@ def get_report(cycle_id: str):
 def generate_report(cycle_id: str):
     findings = rag_service.build_findings(cycle_id)
     return rag_service.build_report(cycle_id, findings)
+
+
+@app.get("/api/cycles/{cycle_id}/report/export")
+def export_report_pdf(cycle_id: str):
+    if not store.get_cycle(cycle_id):
+        raise HTTPException(status_code=404, detail="Cycle not found")
+    findings = rag_service.build_findings(cycle_id)
+    report = rag_service.build_report(cycle_id, findings)
+    pdf_bytes = build_report_pdf(report)
+    filename = f"ICAAP_Report_{cycle_id[:8]}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/api/cycles/{cycle_id}/documents/{doc_id}/download")

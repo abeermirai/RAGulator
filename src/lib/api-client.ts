@@ -20,8 +20,30 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function download(path: string, filename: string) {
+  const res = await fetch(`${API_BASE}${path}`);
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(detail || `Download failed: ${res.status}`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export const auditApi = {
-  health: () => request<{ status: string; engine: string }>("/api/health"),
+  health: () =>
+    request<{
+      status: string;
+      engine: string;
+      llm_provider: string;
+      llm_model: string;
+      llm_available: boolean;
+    }>("/api/health"),
 
   getDefaultCycle: () => request<AuditCycle>("/api/cycles/default"),
 
@@ -65,4 +87,7 @@ export const auditApi = {
 
   generateReport: (cycleId: string) =>
     request<ReportResponse>(`/api/cycles/${cycleId}/report/generate`, { method: "POST" }),
+
+  exportReportPdf: (cycleId: string) =>
+    download(`/api/cycles/${cycleId}/report/export`, "ICAAP_Report_2026.pdf"),
 };

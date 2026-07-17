@@ -21,6 +21,7 @@ from app.models import (
     ReportSection,
 )
 from app.pipeline.extractor import ExtractedDocument
+from app.pipeline.llm import llm_service
 
 
 def _now() -> str:
@@ -121,7 +122,7 @@ class RagService:
             highlights.append(quote[:240])
             context_parts.append(f"[{meta.get('filename', 'doc')} p.{meta.get('page', '?')}] {quote}")
 
-        answer = self._synthesize_answer(question, context_parts, citations)
+        answer = llm_service.synthesize_answer(question, context_parts, self._synthesize_answer(question, context_parts, citations))
         confidence = min(98, max(55, int(sum(scores) / max(len(scores), 1) * 100)))
 
         return QueryResponse(
@@ -191,43 +192,51 @@ class RagService:
         car = self._find_metric(joined, r"(\d{1,2}(?:\.\d+)?)\s*%")
         amount = self._find_metric(joined, r"(\d+(?:\.\d+)?)\s*(?:billion|مليار)")
 
+        finding_fallback = (
+            f"تم استخراج نسبة كفاية رأس المال {car}% من المستندات المرفوعة."
+            if car
+            else "تم تحليل المستندات المرفوعة واستخراج مؤشرات ICAAP الرئيسية."
+        )
+        missing_fallback = (
+            "لم يُرصد في المستندات المرفوعة تحليل حساسية سعر الفائدة — يُنصح بإرفاقه."
+            if "sensitivity" not in joined.lower() and "حساسية" not in joined
+            else "تم رصد بعض إفصاحات الحساسية؛ يُوصى بمراجعتها مقابل متطلبات البند 5.3."
+        )
+        suggestion_fallback = (
+            f"توسيع تحليل التركز الائتماني بناءً على الأدلة المسترجعة"
+            + (f" (هامش رأس المال {amount} مليار)." if amount else ".")
+        )
+
         findings = [
             Finding(
                 category="findings",
                 title="النتائج الرئيسية",
-                body=(
-                    f"تم استخراج نسبة كفاية رأس المال {car}% من المستندات المرفوعة."
-                    if car
-                    else "تم تحليل المستندات المرفوعة واستخراج مؤشرات ICAAP الرئيسية."
-                ),
+                body=llm_service.synthesize_finding("Key ICAAP metrics", snippets, finding_fallback),
             )
         ]
         compliance = [
             Finding(
                 category="compliance",
                 title="ملاحظات الالتزام",
-                body="تمت مطابقة الأدلة المسترجعة مع متطلبات SAMA وBasel III الواردة في المستندات.",
+                body=llm_service.synthesize_finding(
+                    "SAMA and Basel III compliance",
+                    snippets,
+                    "تمت مطابقة الأدلة المسترجعة مع متطلبات SAMA وBasel III الواردة في المستندات.",
+                ),
             )
         ]
         missing = [
             Finding(
                 category="missing",
                 title="معلومات ناقصة",
-                body=(
-                    "لم يُرصد في المستندات المرفوعة تحليل حساسية سعر الفائدة — يُنصح بإرفاقه."
-                    if "sensitivity" not in joined.lower() and "حساسية" not in joined
-                    else "تم رصد بعض إفصاحات الحساسية؛ يُوصى بمراجعتها مقابل متطلبات البند 5.3."
-                ),
+                body=llm_service.synthesize_finding("Missing disclosures", snippets, missing_fallback),
             )
         ]
         suggestions = [
             Finding(
                 category="suggestions",
                 title="مقترحات تحسين",
-                body=(
-                    f"توسيع تحليل التركز الائتماني بناءً على الأدلة المسترجعة"
-                    + (f" (هامش رأس المال {amount} مليار)." if amount else ".")
-                ),
+                body=llm_service.synthesize_finding("Improvement recommendations", snippets, suggestion_fallback),
             )
         ]
         confidence = 88 if all_citations else 60
@@ -244,9 +253,23 @@ class RagService:
         stress_query = self.query(cycle_id, "stress testing SAMA scenario")
         conc_query = self.query(cycle_id, "credit concentration real estate")
 
-        car_text = car_query.answer
-        stress_text = stress_query.answer
-        conc_text = conc_query.answer
+        car_context = [c.quote for c in car_query.citations]
+        stress_context = [c.quote for c in stress_query.citations]
+        conc_context = [c.quote for c in conc_query.citations]
+
+        car_text = llm_service.synthesize_report_section("الملخص التنفيذي", car_context, car_query.answer)
+        stress_text = llm_service.synthesize_report_section("اختبارات الجهد", stress_context, stress_query.answer)
+        conc_text = llm_service.synthesize_report_section("تركز مخاطر الائتمان", conc_context, conc_query.answer)
+        governance_text = llm_service.synthesize_report_section(
+            "الحوكمة وإدارة المخاطر",
+            car_context + stress_context,
+            findings.compliance[0].body,
+        )
+        conclusion_text = llm_service.synthesize_report_section(
+            "الاستنتاجات والتوصيات",
+            conc_context + car_context,
+            f"{findings.findings[0].body} {findings.suggestions[0].body}",
+        )
 
         sections = [
             ReportSection(
@@ -256,22 +279,10 @@ class RagService:
                     f"والمعالجة عبر محرك RAGulator (LlamaIndex · Qdrant · FastEmbed · PyMuPDF). {car_text}"
                 ),
             ),
-            ReportSection(
-                title="٢. الحوكمة وإدارة المخاطر",
-                body=findings.compliance[0].body,
-            ),
-            ReportSection(
-                title="٣. اختبارات الجهد (Stress Testing)",
-                body=stress_text,
-            ),
-            ReportSection(
-                title="٤. تركز مخاطر الائتمان",
-                body=conc_text,
-            ),
-            ReportSection(
-                title="٥. الاستنتاجات والتوصيات",
-                body=f"{findings.findings[0].body} {findings.suggestions[0].body}",
-            ),
+            ReportSection(title="٢. الحوكمة وإدارة المخاطر", body=governance_text),
+            ReportSection(title="٣. اختبارات الجهد (Stress Testing)", body=stress_text),
+            ReportSection(title="٤. تركز مخاطر الائتمان", body=conc_text),
+            ReportSection(title="٥. الاستنتاجات والتوصيات", body=conclusion_text),
         ]
 
         checklist = [

@@ -15,8 +15,9 @@ export const Route = createFileRoute("/_shell/report")({
 
 function Report() {
   const { t, dir } = useApp();
-  const { report, loadReport, findings } = useAudit();
+  const { report, loadReport, exportReportPdf, findings, llmAvailable, llmProvider, cycle } = useAudit();
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -29,22 +30,17 @@ function Report() {
   const checks = data?.checklist ?? [t("rpCheck1"), t("rpCheck2"), t("rpCheck3"), t("rpCheck4"), t("rpCheck5")];
   const confidence = data?.confidence ?? findings?.confidence ?? 95;
 
-  const handleExport = () => {
-    if (!data) return;
-    const text = [
-      data.title,
-      data.meta,
-      "",
-      ...data.sections.flatMap((s) => [s.title, s.body, ""]),
-    ].join("\n");
-    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "ICAAP_Report_2026.txt";
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success(t("rpExport"));
+  const handleExport = async () => {
+    if (!cycle) return;
+    setExporting(true);
+    try {
+      await exportReportPdf();
+      toast.success(t("rpExport"));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Export failed");
+    } finally {
+      setExporting(false);
+    }
   };
 
   return (
@@ -52,6 +48,11 @@ function Report() {
       <TopBar title={t("rpTitle")} subtitle={t("rpSubtitle")} />
       <div className="p-8">
         {loading && <p className="text-sm text-muted-foreground mb-4">{t("processing")}...</p>}
+        <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
+          <span className="rounded-full border border-border bg-secondary/50 px-3 py-1 text-muted-foreground">
+            LLM: {llmAvailable ? (llmProvider ?? "active") : "extractive fallback"}
+          </span>
+        </div>
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,7fr)_minmax(0,3fr)] gap-8">
           <Card className="border-border shadow-elegant">
             <CardContent className="p-0">
@@ -119,8 +120,8 @@ function Report() {
             <Button className="bg-[#001827] hover:bg-[#0a2740] text-white h-11 px-5">
               <Send className={`me-2 h-4 w-4 ${dir === "rtl" ? "rotate-180" : ""}`} /> {t("rpSubmit")}
             </Button>
-            <Button onClick={handleExport} className="bg-[#5E6BB2] hover:bg-[#4d5aa1] text-white h-11 px-5">
-              <Download className="me-2 h-4 w-4" /> {t("rpExport")}
+            <Button onClick={() => void handleExport()} disabled={exporting || !cycle} className="bg-[#5E6BB2] hover:bg-[#4d5aa1] text-white h-11 px-5">
+              <Download className="me-2 h-4 w-4" /> {exporting ? t("processing") : t("rpExport")}
             </Button>
             <Button variant="outline" className="h-11 px-5 border-border">
               <Save className="me-2 h-4 w-4" /> {t("rpSaveDraft")}
