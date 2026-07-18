@@ -12,12 +12,37 @@ Python API for ICAAP document ingestion and RAG analysis.
 
 ## Setup
 
+### Windows
+
+If `python3 --version` works on your machine, use **python3** for everything (not `py` or `python`).
+
+Open **Command Prompt** or **PowerShell**, go to your project folder, then run **one command per line**:
+
+```bat
+cd backend
+python3 -m pip install -r requirements.txt
+python3 run.py
+```
+
+Or from the project root, double-click / run:
+
+```bat
+backend\start.bat
+```
+
+If `python3 -m pip` fails, try:
+
+```bat
+python3 -m ensurepip --upgrade
+python3 -m pip install -r requirements.txt
+```
+
+### macOS / Linux
+
 ```bash
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python run.py
+python3 -m pip install -r requirements.txt
+python3 run.py
 ```
 
 API runs at `http://127.0.0.1:8000`.
