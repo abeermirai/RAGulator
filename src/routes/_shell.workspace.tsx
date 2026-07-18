@@ -18,7 +18,7 @@ export const Route = createFileRoute("/_shell/workspace")({
 
 function Workspace() {
   const { t, dir } = useApp();
-  const { messages, findings, askQuestion, documents, pipeline, analyzing, apiOnline } = useAudit();
+  const { messages, findings, askQuestion, documents, pipeline, analyzing, apiOnline, runAnalysis } = useAudit();
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const latestResponse = [...messages].reverse().find((m) => m.role === "assistant")?.response;
@@ -69,6 +69,13 @@ function Workspace() {
         {analyzing && (
           <div className="mb-4 rounded-xl border border-border bg-secondary/40 p-3 text-sm text-muted-foreground">
             {t("processing")} — {t("ragSubtitle")}
+          </div>
+        )}
+        {hasDocs && !findings && !analyzing && (
+          <div className="mb-4 flex justify-end">
+            <Button onClick={() => void runAnalysis()} className="bg-[#5E6BB2] hover:bg-[#4d5aa1] text-white">
+              {t("ragTitle")}
+            </Button>
           </div>
         )}
 

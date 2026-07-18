@@ -131,5 +131,5 @@ def create_document_record(
         status=DocumentStatus.queued,
         progress=0,
         stages=_build_stages(ProcessingStage.uploading),
-        uploaded_at=_now(),
+        uploaded_at=_iso_now(),
     )

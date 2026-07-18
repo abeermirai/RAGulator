@@ -10,6 +10,7 @@ import type {
 } from "@/lib/types/audit";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
+const CYCLE_KEY = "ragulator.activeCycleId";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, init);
@@ -35,6 +36,15 @@ async function download(path: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+export function getStoredCycleId(): string | null {
+  if (typeof window === "undefined") return null;
+  return sessionStorage.getItem(CYCLE_KEY);
+}
+
+export function storeCycleId(id: string) {
+  sessionStorage.setItem(CYCLE_KEY, id);
+}
+
 export const auditApi = {
   health: () =>
     request<{
@@ -46,6 +56,15 @@ export const auditApi = {
     }>("/api/health"),
 
   getDefaultCycle: () => request<AuditCycle>("/api/cycles/default"),
+
+  startNewCycle: (name = "ICAAP 2026") =>
+    request<AuditCycle>("/api/cycles/default/new", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }),
+
+  getCycle: (cycleId: string) => request<AuditCycle>(`/api/cycles/${cycleId}`),
 
   createCycle: (name = "ICAAP 2026") =>
     request<AuditCycle>("/api/cycles", {

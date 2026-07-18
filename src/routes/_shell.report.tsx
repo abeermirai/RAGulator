@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { TopBar } from "@/components/top-bar";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,20 +15,23 @@ export const Route = createFileRoute("/_shell/report")({
 
 function Report() {
   const { t, dir } = useApp();
-  const { report, loadReport, exportReportPdf, findings, llmAvailable, llmProvider, cycle } = useAudit();
+  const { report, loadReport, exportReportPdf, findings, llmAvailable, llmProvider, cycle, pipeline, documents, analyzing, apiOnline } = useAudit();
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const ready = pipeline?.ready && documents.some((d) => d.status === "ready");
 
   useEffect(() => {
+    if (!apiOnline || !cycle || !ready || analyzing) return;
     setLoading(true);
     loadReport()
       .catch((err) => toast.error(err instanceof Error ? err.message : "Failed to load report"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [apiOnline, cycle?.id, ready, analyzing, findings]);
 
   const data = report;
-  const checks = data?.checklist ?? [t("rpCheck1"), t("rpCheck2"), t("rpCheck3"), t("rpCheck4"), t("rpCheck5")];
+  const checks = data?.checklist ?? (findings ? [] : [t("rpCheck1"), t("rpCheck2"), t("rpCheck3"), t("rpCheck4"), t("rpCheck5")]);
   const confidence = data?.confidence ?? findings?.confidence ?? 95;
+  const sections = data?.sections ?? (findings ? [] : fallbackSections(t));
 
   const handleExport = async () => {
     if (!cycle) return;
@@ -48,6 +51,21 @@ function Report() {
       <TopBar title={t("rpTitle")} subtitle={t("rpSubtitle")} />
       <div className="p-8">
         {loading && <p className="text-sm text-muted-foreground mb-4">{t("processing")}...</p>}
+        {!apiOnline && (
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+            Backend غير متصل — التقرير يتطلب Python API على المنفذ 8000.
+          </div>
+        )}
+        {apiOnline && !ready && (
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            {t("ragStep1")} — <Link to="/ingestion" className="underline">{t("navIngestion")}</Link>
+          </div>
+        )}
+        {analyzing && (
+          <div className="mb-4 rounded-xl border border-border bg-secondary/40 p-3 text-sm text-muted-foreground">
+            {t("processing")} — {t("ragSubtitle")}
+          </div>
+        )}
         <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
           <span className="rounded-full border border-border bg-secondary/50 px-3 py-1 text-muted-foreground">
             LLM: {llmAvailable ? (llmProvider ?? "active") : "extractive fallback"}
@@ -65,7 +83,7 @@ function Report() {
                   <p className="mt-3 text-sm text-muted-foreground">{data?.meta ?? t("rpDocMeta")}</p>
                 </div>
 
-                {(data?.sections ?? fallbackSections(t)).map((section) => (
+                {(sections.length ? sections : [{ title: t("processing"), body: t("ragSubtitle") }]).map((section) => (
                   <Section key={section.title} title={section.title}>
                     {section.body}
                   </Section>

@@ -55,14 +55,8 @@ class CycleStore:
     def get_or_create_default(self) -> AuditCycle:
         if not self._cycles:
             return self.create_cycle("ICAAP 2026")
-        # Use the cycle with the most recently uploaded document
-        def latest_upload(cycle: AuditCycle) -> str:
-            docs = self.list_documents(cycle.id)
-            if not docs:
-                return cycle.created_at
-            return max(d.uploaded_at for d in docs)
-
-        return max(self._cycles.values(), key=latest_upload)
+        # Most recently created cycle (each upload batch can create a new cycle)
+        return max(self._cycles.values(), key=lambda c: c.created_at)
 
     def add_document(self, doc: DocumentRecord) -> None:
         self._documents[doc.id] = doc

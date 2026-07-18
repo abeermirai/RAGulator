@@ -58,6 +58,11 @@ def get_default_cycle() -> AuditCycle:
     return store.get_or_create_default()
 
 
+@app.post("/api/cycles/default/new", response_model=AuditCycle)
+def start_new_cycle(body: CreateCycleRequest = CreateCycleRequest()) -> AuditCycle:
+    return store.create_cycle(body.name)
+
+
 @app.get("/api/cycles/{cycle_id}", response_model=AuditCycle)
 def get_cycle(cycle_id: str) -> AuditCycle:
     cycle = store.get_cycle(cycle_id)

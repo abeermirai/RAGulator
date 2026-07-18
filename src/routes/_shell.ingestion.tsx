@@ -23,7 +23,7 @@ const ZONE_MAP: Array<{ zone: DocumentZone; titleKey: "zone1Title" | "zone2Title
 
 function Ingestion() {
   const { t } = useApp();
-  const { documents, pipeline, apiOnline, uploadFile, deleteDocument } = useAudit();
+  const { documents, pipeline, apiOnline, uploadFile, deleteDocument, runAnalysis, analyzing, startNewSession } = useAudit();
   const progress = pipeline?.progress ?? 0;
 
   return (
@@ -82,7 +82,10 @@ function Ingestion() {
             <Progress value={progress} className="h-2 mb-6 [&>div]:bg-[#5E6BB2]" />
             <PipelineTimeline stages={pipeline?.stages ?? []} />
             {pipeline?.ready && (
-              <div className="mt-6 flex justify-end">
+              <div className="mt-6 flex flex-wrap justify-end gap-3">
+                <Button variant="outline" onClick={() => void runAnalysis()} disabled={analyzing}>
+                  {analyzing ? t("processing") : t("ragTitle")}
+                </Button>
                 <Link to="/workspace">
                   <Button className="bg-[#5E6BB2] hover:bg-[#4d5aa1] text-white">{t("navWorkspace")}</Button>
                 </Link>
@@ -92,6 +95,12 @@ function Ingestion() {
         </Card>
 
         <DocumentInventory documents={documents} onDelete={deleteDocument} />
+
+        <div className="flex justify-end">
+          <Button variant="ghost" className="text-xs" onClick={() => void startNewSession()}>
+            {t("startNewAudit")}
+          </Button>
+        </div>
       </div>
     </>
   );
